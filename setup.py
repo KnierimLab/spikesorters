@@ -15,7 +15,7 @@ setup(
     description="Python wrappers for popular spike sorters",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/SpikeInterface/spikesorters",
+    url="https://github.com/KnierimLab/spikesorters",
     packages=find_packages(),
     package_data={},
     include_package_data=True,
