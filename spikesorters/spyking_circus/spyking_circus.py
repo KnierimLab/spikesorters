@@ -2,6 +2,7 @@ import copy
 from pathlib import Path
 import os
 import numpy as np
+from numpy.lib.format import open_memmap
 import sys
 
 import spikeextractors as se
@@ -21,7 +22,6 @@ class SpykingcircusSorter(BaseSorter):
     """
 
     sorter_name = 'spykingcircus'
-    installed = HAVE_SC
     requires_locations = False
 
     _default_params = {
@@ -37,7 +37,24 @@ class SpykingcircusSorter(BaseSorter):
         'clustering_max_elts': 10000,  # I believe it relates to subsampling and affects compute time
         }
 
-    installation_mesg = """
+    _params_description = {
+        'detect_sign': "Use -1 (negative), 1 (positive) or 0 (both) depending "
+                       "on the sign of the spikes in the recording",
+        'adjacency_radius': "Radius in um to build channel neighborhood",
+        'detect_threshold': "Threshold for spike detection",
+        'template_width_ms': "Template width in ms. Recommended values: 3 for in vivo - 5 for in vitro",
+        'filter': "Enable or disable filter",
+        'merge_spikes': "Enable or disable automatic mergind",
+        'auto_merge': "Automatic merging threshold",
+        'num_workers': "Number of workers (if None, half of the cpu number is used)",
+        'whitening_max_elts': "Max number of events per electrode for whitening",
+        'clustering_max_elts': "Max number of events per electrode for clustering",
+    }
+
+    sorter_description = """Spyking Circus uses a smart clustering and a greedy template matching approach for 
+    spike sorting. For more information see https://doi.org/10.7554/eLife.34518"""
+
+    installation_mesg = """\nTo use Spyking-Circus run:\n
         >>> pip install spyking-circus
 
         Need MPICH working, for ubuntu do:
@@ -49,7 +66,11 @@ class SpykingcircusSorter(BaseSorter):
 
     def __init__(self, **kargs):
         BaseSorter.__init__(self, **kargs)
-
+    
+    @classmethod
+    def is_installed(cls):
+        return HAVE_SC
+    
     @staticmethod
     def get_sorter_version():
         return circus.__version__
@@ -67,8 +88,6 @@ class SpykingcircusSorter(BaseSorter):
         # save binary file
         file_name = 'recording'
         # We should make this copy more efficient with chunks
-
-        from numpy.lib.format import open_memmap
 
         n_chan = recording.get_num_channels()
         n_frames = recording.get_num_frames()
@@ -135,5 +154,5 @@ class SpykingcircusSorter(BaseSorter):
 
     @staticmethod
     def get_result_from_folder(output_folder):
-        sorting = se.SpykingCircusSortingExtractor(folder_path=Path(output_folder) / 'recording')
+        sorting = se.SpykingCircusSortingExtractor(file_or_folder_path=Path(output_folder) / 'recording')
         return sorting

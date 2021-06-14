@@ -32,62 +32,41 @@ def _run_one(arg_list):
 def run_sorters(sorter_list, recording_dict_or_list, working_folder, sorter_params={}, grouping_property=None,
                 mode='raise', engine=None, engine_kwargs={}, verbose=False, with_output=True, run_sorter_kwargs={}):
     """
-    This run several sorter on several recording.
-    Simple implementation are nested loops or with multiprocessing.
-
-    sorter_list: list of str (sorter names)
-    recording_dict_or_list: a dict (or a list) of recording
-    working_folder : str
-
-    engine = None ( = 'loop') or 'multiprocessing'
-    processes = only if 'multiprocessing' if None then processes=os.cpu_count()
-    verbose=True/False to control sorter verbosity
-
-    Note: engine='multiprocessing' use the python multiprocessing module.
-    This do not allow to have subprocess in subprocess.
-    So sorter that already use internally multiprocessing, this will fail.
+    Run several sorters on several recordings.
 
     Parameters
     ----------
-
     sorter_list: list of str
-        List of sorter name.
-
+        List of sorter names to run.
     recording_dict_or_list: dict or list
-        A dict of recording. The key will be the name of the recording.
-        In a list is given then the name will be recording_0, recording_1, ...
-
+        A dict of recordings. The key will be the name of the recording.
+        If a list is given then the name will be recording_0, recording_1, ...
     working_folder: str
         The working directory.
         This must not exist before calling this function.
-
-    grouping_property: str or None
-        The property of grouping given to sorters.
-
     sorter_params: dict of dict with sorter_name as key
         This allow to overwrite default params for sorter.
-
-    mode: 'raise_if_exists' or 'overwrite' or 'keep'
+    grouping_property: str or None
+        The property of grouping given to sorters.
+    mode: 'raise' or 'overwrite' or 'keep'
         The mode when the subfolder of recording/sorter already exists.
             * 'raise' : raise error if subfolder exists
             * 'overwrite' : force recompute
             * 'keep' : do not compute again if f=subfolder exists and log is OK
-
-    engine: str
-        'loop', 'multiprocessing', or 'dask'
-
+    engine: 'loop' or 'multiprocessing' or 'dask'
+        Which approach to use to run the multiple sorters.
+            * 'loop' : run sorters in a loop (serially)
+            * 'multiprocessing' : use the Python multiprocessing library to run in parallel
+            * 'dask' : use the Dask module to run in parallel
     engine_kwargs: dict
         This contains kwargs specific to the launcher engine:
             * 'loop' : no kargs
             * 'multiprocessing' : {'processes' : } number of processes
             * 'dask' : {'client':} the dask client for submiting task
-            
     verbose: bool
-        default True
-
+        Controls sorter verbosity.
     with_output: bool
         return the output.
-
     run_sorter_kwargs: dict
         This contains kwargs specific to run_sorter function:\
             * 'raise_error' :  bool
@@ -96,15 +75,18 @@ def run_sorters(sorter_list, recording_dict_or_list, working_folder, sorter_para
             * 'joblib_backend' : 'loky' / 'multiprocessing' / 'threading'
 
     Returns
-    ----------
-
+    -------
     results : dict
         The output is nested dict[(rec_name, sorter_name)] of SortingExtractor.
 
+    Notes
+    -----
+    Using multiprocessing through this function does not allow for subprocesses, so
+    sorters that already use internally multiprocessing will fail.
     """
-    if mode == 'raise':
-        assert not os.path.exists(working_folder), 'working_folder already exists, please remove it'
     working_folder = Path(working_folder)
+    if mode == 'raise':
+        assert not working_folder.is_dir(), "'working_folder' already exists, please remove it"
 
     if engine is None:
         engine = 'loop'
@@ -194,7 +176,7 @@ def run_sorters(sorter_list, recording_dict_or_list, working_folder, sorter_para
 
 def is_log_ok(output_folder):
     # log is OK when run_time is not None
-    if os.path.exists(output_folder / 'spikeinterface_log.json'):
+    if (output_folder / 'spikeinterface_log.json').is_file():
         with open(output_folder / 'spikeinterface_log.json', mode='r', encoding='utf8') as logfile:
             log = json.load(logfile)
             run_time = log.get('run_time', None)
@@ -206,11 +188,11 @@ def is_log_ok(output_folder):
 def iter_output_folders(output_folders):
     output_folders = Path(output_folders)
     for rec_name in os.listdir(output_folders):
-        if not os.path.isdir(output_folders / rec_name):
+        if not (output_folders / rec_name).is_dir():
             continue
         for sorter_name in os.listdir(output_folders / rec_name):
             output_folder = output_folders / rec_name / sorter_name
-            if not os.path.isdir(output_folder):
+            if not output_folder.is_dir():
                 continue
             if not is_log_ok(output_folder):
                 continue

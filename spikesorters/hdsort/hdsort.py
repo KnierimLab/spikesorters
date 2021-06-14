@@ -1,12 +1,15 @@
 from pathlib import Path
 import os
 from typing import Union
+import numpy as np
 import sys
 
 import spikeextractors as se
 from ..basesorter import BaseSorter
 from ..utils.shellscript import ShellScript
 from ..sorter_tools import recover_recording
+
+PathType = Union[str, Path]
 
 
 def check_if_installed(hdsort_path: Union[str, None]):
@@ -29,15 +32,14 @@ class HDSortSorter(BaseSorter):
 
     sorter_name: str = 'hdsort'
     hdsort_path: Union[str, None] = os.getenv('HDSORT_PATH', None)
-    installed = check_if_installed(hdsort_path)
     requires_locations = False
     _default_params = {
         'detect_threshold': 4.2,
         'detect_sign': -1,  # -1 - 1
         'filter': True,
         'parfor': True,
-        'hpf': 300,
-        'lpf': 7000,
+        'freq_min': 300,
+        'freq_max': 7000,
         'max_el_per_group': 9,
         'min_el_per_group': 1,
         'add_if_nearer_than': 20,
@@ -45,7 +47,29 @@ class HDSortSorter(BaseSorter):
         'n_pc_dims': 6,
         'chunk_size': 500000,
         'loop_mode': 'local_parfor',
+        'chunk_mb': 500
     }
+
+    _params_description = {
+        'detect_threshold': "Threshold for spike detection",
+        'detect_sign': "Use -1 (negative) or 1 (positive) depending "
+                       "on the sign of the spikes in the recording",
+        'filter': "Enable or disable filter",
+        'parfor': "If True, the Matlab parfor is used",
+        'freq_min': "High-pass filter cutoff frequency",
+        'freq_max': "Low-pass filter cutoff frequency",
+        'max_el_per_group': "Maximum number of channels per electrode group",
+        'min_el_per_group': "Minimum number of channels per electrode group",
+        'add_if_nearer_than': "Minimum distance to add electrode to an electrode group",
+        'max_distance_within_group': "Maximum distance within an electrode group",
+        'n_pc_dims': "Number of principal components dimensions to perform initial clustering",
+        'chunk_size': "Chunk size in number of frames for template-matching",
+        'loop_mode': "Loop mode: 'loop', 'local_parfor', 'grid' (requires a grid architecture)",
+        'chunk_mb': "Chunk size in Mb for saving to binary format (default 500Mb)",
+    }
+
+    sorter_description = """HDSort is a template-matching spike sorter designed for high density micro-electrode arrays. 
+    For more information see https://doi.org/10.1152/jn.00803.2017"""
 
     installation_mesg = """\nTo use HDSort run:\n
         >>> git clone https://git.bsse.ethz.ch/hima_public/HDsort.git
@@ -58,21 +82,24 @@ class HDSortSorter(BaseSorter):
 
     def __init__(self, **kargs):
         BaseSorter.__init__(self, **kargs)
-
+    
+    @classmethod
+    def is_installed(cls):
+        return check_if_installed(cls.hdsort_path)
+    
     @staticmethod
     def get_sorter_version():
         p = os.getenv('HDSORT_PATH', None)
         if p is None:
             return 'unknown'
         else:
-            with open(os.path.join(p, 'version.txt'), mode='r', encoding='utf8') as f:
+            with open(str(Path(p) / 'version.txt'), mode='r', encoding='utf8') as f:
                 version = f.readline()
         return version
 
     @staticmethod
-    def set_hdsort_path(hdsort_path: str):
-        HDSortSorter.hdsort_path = hdsort_path
-        HDSortSorter.installed = check_if_installed(HDSortSorter.hdsort_path)
+    def set_hdsort_path(hdsort_path: PathType):
+        HDSortSorter.hdsort_path = str(Path(hdsort_path).absolute())
         try:
             print("Setting HDSORT_PATH environment variable for subprocess calls to:", hdsort_path)
             os.environ["HDSORT_PATH"] = hdsort_path
@@ -80,26 +107,20 @@ class HDSortSorter(BaseSorter):
             print("Could not set HDSORT_PATH environment variable:", e)
 
     def _setup_recording(self, recording, output_folder):
-        if not check_if_installed(HDSortSorter.hdsort_path):
+        if not self.is_installed():
             raise Exception(HDSortSorter.installation_mesg)
-        assert isinstance(HDSortSorter.hdsort_path, str)
 
         source_dir = Path(__file__).parent
         utils_path = source_dir.parent / 'utils'
 
-        if isinstance(recording, se.Mea1kRecordingExtractor):
-            self.params['file_name'] = str(Path(recording._file_path).absolute())
-            self.params['file_format'] = 'mea1k'
-            print('Using Mea1k format')
-        elif isinstance(recording, se.MaxOneRecordingExtractor):
+        if isinstance(recording, se.MaxOneRecordingExtractor):
             self.params['file_name'] = str(Path(recording._file_path).absolute())
             self.params['file_format'] = 'maxone'
             print('Using MaxOne format')
         else:
             file_name = output_folder / 'recording.h5'
             # Generate three files dataset in Mea1k format
-            se.Mea1kRecordingExtractor.write_recording(recording=recording, save_path=str(file_name))
-            self.params['file_name'] = str(file_name.absolute())
+            self.write_hdsort_input_format(recording, save_path=str(file_name), chunk_mb=self.params["chunk_mb"])
             self.params['file_format'] = 'mea1k'
 
         p = self.params
@@ -137,8 +158,8 @@ class HDSortSorter(BaseSorter):
         hdsort_config_txt = hdsort_config_txt.format(
             filter=p['filter'],
             parfor=p['parfor'],
-            hpf=p['hpf'],
-            lpf=p['lpf'],
+            hpf=p['freq_min'],
+            lpf=p['freq_max'],
             max_el_per_group=p['max_el_per_group'],
             min_el_per_group=p['min_el_per_group'],
             add_if_nearer_than=p['add_if_nearer_than'],
@@ -155,7 +176,7 @@ class HDSortSorter(BaseSorter):
     def _run(self, recording, output_folder):
         recording = recover_recording(recording)
         tmpdir = output_folder
-        os.makedirs(str(tmpdir), exist_ok=True)
+        tmpdir.mkdir(parents=True, exist_ok=True)
         samplerate = recording.get_sampling_frequency()
 
         if recording.is_filtered and self.params['filter']:
@@ -164,9 +185,10 @@ class HDSortSorter(BaseSorter):
 
         if "win" in sys.platform and sys.platform != 'darwin':
             shell_cmd = '''
+                        {disk_move}
                         cd {tmpdir}
                         matlab -nosplash -wait -r hdsort_master
-                    '''.format(tmpdir=output_folder)
+                    '''.format(disk_move=str(output_folder)[:2], tmpdir=output_folder)
         else:
             shell_cmd = '''
                         #!/bin/bash
@@ -187,6 +209,7 @@ class HDSortSorter(BaseSorter):
         with open(samplerate_fname, 'w') as f:
             f.write('{}'.format(samplerate))
 
+
     @staticmethod
     def get_result_from_folder(output_folder):
         output_folder = Path(output_folder)
@@ -194,3 +217,50 @@ class HDSortSorter(BaseSorter):
                                                           'hdsort_output_results.mat'))
 
         return sorting
+
+    def write_hdsort_input_format(self, recording, save_path, chunk_size=None, chunk_mb=500):
+        try:
+            import h5py
+        except:
+            raise Exception("To use HDSort, install h5py: pip install h5py")
+
+        # check if already in write format
+        write_file = True
+        if hasattr(recording, '_file_path'):
+            if Path(recording._file_path).suffix in ['.h5', '.hdf5']:
+                with h5py.File(recording._file_path, 'r') as f:
+                    keys = f.keys()
+                    if "version" in keys and "ephys" in keys and "mapping" in keys and "frame_rate" in keys \
+                        and "frame_numbers" in keys:
+                        if "sig" in f["ephys"].keys():
+                            write_file = False
+                            self.params['file_name'] = str(Path(recording._file_path).absolute())
+
+        if write_file:
+            save_path = Path(save_path)
+            if save_path.suffix == '':
+                save_path = Path(str(save_path) + '.h5')
+            mapping_dtype = np.dtype([('electrode', np.int32), ('x', np.float64), ('y', np.float64),
+                                      ('channel', np.int32)])
+
+            assert 'location' in recording.get_shared_channel_property_names(), "'location' property is needed " \
+                                                                                "to run HDSort"
+
+            with h5py.File(save_path, 'w') as f:
+                f.create_group('ephys')
+                f.create_dataset('version', data=str(20161003))
+                ephys = f['ephys']
+                ephys.create_dataset('frame_rate', data=recording.get_sampling_frequency())
+                ephys.create_dataset('frame_numbers', data=np.arange(recording.get_num_frames()))
+                # save mapping
+                mapping = np.empty(recording.get_num_channels(), dtype=mapping_dtype)
+                x = recording.get_channel_locations()[:, 0]
+                y = recording.get_channel_locations()[:, 1]
+                for i, ch in enumerate(recording.get_channel_ids()):
+                    mapping[i] = (ch, x[i], y[i], ch)
+                ephys.create_dataset('mapping', data=mapping)
+                # save traces
+                recording.write_to_h5_dataset_format('/ephys/signal', file_handle=f, time_axis=1,
+                                                     chunk_size=chunk_size, chunk_mb=chunk_mb)
+            self.params['file_name'] = str(save_path.absolute())
+

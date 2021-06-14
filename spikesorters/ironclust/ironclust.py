@@ -10,6 +10,8 @@ from ..utils.shellscript import ShellScript
 from ..basesorter import BaseSorter
 from ..sorter_tools import recover_recording
 
+PathType = Union[str, Path]
+
 
 def check_if_installed(ironclust_path: Union[str, None]):
     if ironclust_path is None:
@@ -32,43 +34,87 @@ class IronClustSorter(BaseSorter):
 
     sorter_name: str = 'ironclust'
     ironclust_path: Union[str, None] = os.getenv('IRONCLUST_PATH', None)
-    installed = check_if_installed(ironclust_path)
+    
     requires_locations = True
 
-    _default_params = dict(
-        detect_sign=-1,  # Use -1, 0, or 1, depending on the sign of the spikes in the recording
-        adjacency_radius=50,  # Use -1 to include all channels in every neighborhood
-        adjacency_radius_out=100,  # Use -1 to include all channels in every neighborhood
-        detect_threshold=3.5,  # detection threshold
-        prm_template_name='',  # .prm template file name
-        freq_min=300,
-        freq_max=8000,
-        merge_thresh=0.985,  # Threshold for automated merging
-        pc_per_chan=9,  # Number of principal components per channel
-        whiten=False,  # Whether to do channel whitening as part of preprocessing
-        filter_type='bandpass',  # none, bandpass, wiener, fftdiff, ndiff
-        filter_detect_type='none',  # none, bandpass, wiener, fftdiff, ndiff
-        common_ref_type='trimmean',  # none, mean, median
-        batch_sec_drift=300,  # batch duration in seconds. clustering time duration
-        step_sec_drift=20,  # compute anatomical similarity every n sec
-        knn=30,  # K nearest neighbors
-        min_count=30,  # Minimum cluster size
-        fGpu=True,  # Use GPU if available
-        fft_thresh=8,  # FFT-based noise peak threshold
-        fft_thresh_low=0,  # FFT-based noise peak lower threshold (set to 0 to disable dual thresholding scheme)
-        nSites_whiten=16,  # Number of adjacent channels to whiten
-        feature_type='gpca',  # gpca, pca, vpp, vmin, vminmax, cov, energy, xcov
-        delta_cut=1,  # Cluster detection threshold (delta-cutoff)
-        post_merge_mode=1,  # post merge mode
-        sort_mode=1,  # sort mode
-        fParfor=False, #parfor loop
-        filter=True, # Enable or disable filter
-        clip_pre=0.25, # pre-peak clip duration in ms
-        clip_post=0.75, # post-peak clip duration in ms
-        merge_thresh_cc=1, #cross-correlogram merging threshold, set to 1 to disable
-        nRepeat_merge=3, #number of repeats for merge
-        merge_overlap_thresh=0.95   #knn-overlap merge threshold
-    )
+    _default_params = {
+        'detect_sign': -1,  # Use -1, 0, or 1, depending on the sign of the spikes in the recording
+        'adjacency_radius': 50,  # Use -1 to include all channels in every neighborhood
+        'adjacency_radius_out': 100,  # Use -1 to include all channels in every neighborhood
+        'detect_threshold': 3.5,  # detection threshold
+        'prm_template_name': '',  # .prm template file name
+        'freq_min': 300,
+        'freq_max': 8000,
+        'merge_thresh': 0.985,  # Threshold for automated merging
+        'pc_per_chan': 9,  # Number of principal components per channel
+        'whiten': False,  # Whether to do channel whitening as part of preprocessing
+        'filter_type': 'bandpass',  # none, bandpass, wiener, fftdiff, ndiff
+        'filter_detect_type': 'none',  # none, bandpass, wiener, fftdiff, ndiff
+        'common_ref_type': 'trimmean',  # none, mean, median
+        'batch_sec_drift': 300,  # batch duration in seconds. clustering time duration
+        'step_sec_drift': 20,  # compute anatomical similarity every n sec
+        'knn': 30,  # K nearest neighbors
+        'n_jobs_bin': 1, # number of jobs for binary write
+        'chunk_mb': 500,
+        'min_count': 30,  # Minimum cluster size
+        'fGpu': True,  # Use GPU if available
+        'fft_thresh': 8,  # FFT-based noise peak threshold
+        'fft_thresh_low': 0,  # FFT-based noise peak lower threshold (set to 0 to disable dual thresholding scheme)
+        'nSites_whiten': 16,  # Number of adjacent channels to whiten
+        'feature_type': 'gpca',  # gpca, pca, vpp, vmin, vminmax, cov, energy, xcov
+        'delta_cut': 1,  # Cluster detection threshold (delta-cutoff)
+        'post_merge_mode': 1,  # post merge mode
+        'sort_mode': 1,  # sort mode
+        'fParfor': False, #parfor loop
+        'filter': True, # Enable or disable filter
+        'clip_pre': 0.25, # pre-peak clip duration in ms
+        'clip_post': 0.75, # post-peak clip duration in ms
+        'merge_thresh_cc': 1, #cross-correlogram merging threshold, set to 1 to disable
+        'nRepeat_merge': 3, #number of repeats for merge
+        'merge_overlap_thresh': 0.95   #knn-overlap merge threshold
+    }
+
+    _params_description = {
+        'detect_sign': "Use -1 (negative), 1 (positive) or 0 (both) depending "
+                       "on the sign of the spikes in the recording",
+        'adjacency_radius': "Use -1 to include all channels in every neighborhood",
+        'adjacency_radius_out': "Use -1 to include all channels in every neighborhood",
+        'detect_threshold': "detection threshold",
+        'prm_template_name': ".prm template file name",
+        'freq_min': "High-pass filter cutoff frequency",
+        'freq_max': "Low-pass filter cutoff frequency",
+        'merge_thresh': "Threshold for automated merging",
+        'pc_per_chan': "Number of principal components per channel",
+        'whiten': "Whether to do channel whitening as part of preprocessing",
+        'filter_type': "Filter type: none, bandpass, wiener, fftdiff, ndiff",
+        'filter_detect_type': "Filter type for detection: none, bandpass, wiener, fftdiff, ndiff",
+        'common_ref_type': "Common reference type: none, mean, median, trimmean",
+        'batch_sec_drift': "Batch duration in seconds. clustering time duration",
+        'step_sec_drift': "Compute anatomical similarity every n sec",
+        'knn': "K nearest neighbors",
+        'min_count': "Minimum cluster size",
+        'fGpu': "Use GPU if True",
+        'fft_thresh': "FFT-based noise peak threshold",
+        'fft_thresh_low': "FFT-based noise peak lower threshold (set to 0 to disable dual thresholding scheme)",
+        'nSites_whiten': "Number of adjacent channels to whiten",
+        'feature_type': "gpca, pca, vpp, vmin, vminmax, cov, energy, xcov",
+        'delta_cut': "Cluster detection threshold (delta-cutoff)",
+        'post_merge_mode': "Post merge mode",
+        'sort_mode': "Sort mode",
+        'fParfor': "Parfor loop",
+        'filter': "Enable or disable filter",
+        'clip_pre': "Pre-peak clip duration in ms",
+        'clip_post': "Post-peak clip duration in ms",
+        'merge_thresh_cc': "Cross-correlogram merging threshold, set to 1 to disable",
+        'nRepeat_merge': "Number of repeats for merge",
+        'merge_overlap_thresh': "Knn-overlap merge threshold",
+        'chunk_mb': "Chunk size in Mb for saving to binary format (default 500Mb)",
+        'n_jobs_bin': "Number of jobs for saving to binary format (Default 1)"
+    }
+
+    sorter_descrpition = """Ironclust is a density-based spike sorter designed for high-density probes 
+    (e.g. Neuropixels). It uses features and spike location estimates for clustering, and it performs a drift 
+    correction. For more information see https://doi.org/10.1101/101030"""
 
     installation_mesg = """\nTo use IronClust run:\n
         >>> git clone https://github.com/flatironinstitute/ironclust
@@ -78,12 +124,16 @@ class IronClustSorter(BaseSorter):
 
     def __init__(self, **kargs):
         BaseSorter.__init__(self, **kargs)
+    
+    @classmethod
+    def is_installed(cls):
+        return check_if_installed(cls.ironclust_path)
 
     @staticmethod
     def get_sorter_version():
-        version_filename = os.path.join(os.environ["IRONCLUST_PATH"], 'matlab', 'version.txt')
-        if os.path.exists(version_filename):
-            with open(version_filename, mode='r', encoding='utf8') as f:
+        version_filename = Path(os.environ["IRONCLUST_PATH"]) / 'matlab' / 'version.txt'
+        if version_filename.is_file():
+            with open(str(version_filename), mode='r', encoding='utf8') as f:
                 line = f.readline()
                 d = {}
                 exec(line, None, d)
@@ -92,10 +142,9 @@ class IronClustSorter(BaseSorter):
         return 'unknown'
 
     @staticmethod
-    def set_ironclust_path(ironclust_path: str):
+    def set_ironclust_path(ironclust_path: PathType):
         ironclust_path = str(Path(ironclust_path).absolute())
         IronClustSorter.ironclust_path = ironclust_path
-        IronClustSorter.installed = check_if_installed(IronClustSorter.ironclust_path)
         try:
             print("Setting IRONCLUST_PATH environment variable for subprocess calls to:", ironclust_path)
             os.environ["IRONCLUST_PATH"] = ironclust_path
@@ -103,13 +152,14 @@ class IronClustSorter(BaseSorter):
             print("Could not set IRONCLUST_PATH environment variable:", e)
 
     def _setup_recording(self, recording: se.RecordingExtractor, output_folder: Path):
-        if not check_if_installed(IronClustSorter.ironclust_path):
+        p = self.params
+        if not self.is_installed():
             raise Exception(IronClustSorter.installation_mesg)
-        assert isinstance(IronClustSorter.ironclust_path, str)
 
         dataset_dir = output_folder / 'ironclust_dataset'
         # Generate three files in the dataset directory: raw.mda, geom.csv, params.json
-        se.MdaRecordingExtractor.write_recording(recording=recording, save_path=str(dataset_dir))
+        se.MdaRecordingExtractor.write_recording(recording=recording, save_path=str(dataset_dir),
+                                                 n_jobs=p["n_jobs_bin"], chunk_mb=p["chunk_mb"], verbose=self.verbose)
 
     def _run(self, recording: se.RecordingExtractor, output_folder: Path):
         recording = recover_recording(recording)
@@ -139,7 +189,7 @@ class IronClustSorter(BaseSorter):
             f.write(txt)
 
         tmpdir = output_folder / 'tmp'
-        os.makedirs(str(tmpdir), exist_ok=True)
+        tmpdir.mkdir(parents=True, exist_ok=True)
         if self.verbose:
             print('Running ironclust in {tmpdir}...'.format(tmpdir=str(tmpdir)))
         cmd = '''
@@ -162,9 +212,10 @@ class IronClustSorter(BaseSorter):
 
         if 'win' in sys.platform and sys.platform != 'darwin':
             shell_cmd = '''
+                {disk_move}
                 cd {tmpdir}
                 matlab -nosplash -wait -log -r run_ironclust
-            '''.format(tmpdir=tmpdir)
+            '''.format(disk_move=str(tmpdir)[:2], tmpdir=tmpdir)
         else:
             shell_cmd = '''
                 #!/bin/bash
@@ -181,9 +232,9 @@ class IronClustSorter(BaseSorter):
         if retcode != 0:
             raise Exception('ironclust returned a non-zero exit code')
 
-        result_fname = str(tmpdir / 'firings.mda')
-        if not os.path.exists(result_fname):
-            raise Exception('Result file does not exist: ' + result_fname)
+        result_fname = tmpdir / 'firings.mda'
+        if not result_fname.is_file():
+            raise Exception(f'Result file does not exist: {result_fname}')
 
         samplerate_fname = str(tmpdir / 'samplerate.txt')
         with open(samplerate_fname, 'w') as f:

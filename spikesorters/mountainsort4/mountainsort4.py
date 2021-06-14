@@ -21,7 +21,6 @@ class Mountainsort4Sorter(BaseSorter):
     """
 
     sorter_name = 'mountainsort4'
-    installed = HAVE_MS4
     requires_locations = False
     compatible_with_parallel = {'loky': True, 'multiprocessing': False, 'threading': False}
 
@@ -40,7 +39,27 @@ class Mountainsort4Sorter(BaseSorter):
         'noise_overlap_threshold': 0.15,  # Use None for no automated curation'
     }
 
-    installation_mesg = """
+    _params_description = {
+        'detect_sign': "Use -1 (negative) or 1 (positive) depending "
+                       "on the sign of the spikes in the recording",  # Use -1, 0, or 1, depending on the sign of the spikes in the recording
+        'adjacency_radius': "Radius in um to build channel neighborhood "
+                            "(Use -1 to include all channels in every neighborhood)",  # Use -1 to include all channels in every neighborhood
+        'freq_min': "High-pass filter cutoff frequency",
+        'freq_max': "Low-pass filter cutoff frequency",
+        'filter': "Enable or disable filter",
+        'whiten': "Enable or disable whitening",
+        'curation': "Enable or disable curation",
+        'num_workers': "Number of workers (if None, half of the cpu number is used)",
+        'clip_size': "Number of samples per waveform",
+        'detect_threshold': "Threshold for spike detection",
+        'detect_interval': "Minimum number of timepoints between events detected on the same channel",
+        'noise_overlap_threshold': "Noise overlap threshold for automatic curation",
+    }
+
+    sorter_description = """Mountainsort4 is a fully automatic density-based spike sorter using the isosplit clustering 
+    method and automatic curation procedures. For more information see https://doi.org/10.1016/j.neuron.2017.08.030"""
+
+    installation_mesg = """\nTo use Mountainsort4 run:\n
        >>> pip install ml_ms4alg
 
     More information on mountainsort at:
@@ -49,7 +68,11 @@ class Mountainsort4Sorter(BaseSorter):
 
     def __init__(self, **kargs):
         BaseSorter.__init__(self, **kargs)
-
+    
+    @classmethod
+    def is_installed(cls):
+        return HAVE_MS4
+    
     @staticmethod
     def get_sorter_version():
         if hasattr(ml_ms4alg, '__version__'):

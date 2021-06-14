@@ -22,7 +22,7 @@ class KlustaSorter(BaseSorter):
     """
 
     sorter_name = 'klusta'
-    installed = HAVE_KLUSTA
+    
     requires_locations = False
 
     _default_params = {
@@ -35,9 +35,29 @@ class KlustaSorter(BaseSorter):
         'n_features_per_channel': 3,
         'pca_n_waveforms_max': 10000,
         'num_starting_clusters': 50,
+        'chunk_mb': 500,
+        'n_jobs_bin': 1
     }
 
-    installation_mesg = """
+    _params_description = {
+        'adjacency_radius': "Radius in um to build channel neighborhood ",
+        'threshold_strong_std_factor': "Strong threshold for spike detection",
+        'threshold_weak_std_factor': "Weak threshold for spike detection",
+        'detect_sign': "Use -1 (negative), 1 (positive) or 0 (both) depending "
+                       "on the sign of the spikes in the recording",
+        'extract_s_before': "Number of samples to cut out before the peak",
+        'extract_s_after': "Number of samples to cut out after the peak",
+        'n_features_per_channel': "Number of PCA features per channel",
+        'pca_n_waveforms_max': "Maximum number of waveforms for PCA",
+        'num_starting_clusters': "Number of initial clusters",
+        'chunk_mb': "Chunk size in Mb for saving to binary format (default 500Mb)",
+        'n_jobs_bin': "Number of jobs for saving to binary format (Default 1)"
+    }
+
+    sorter_description = """Klusta is a density-based spike sorter that uses a masked EM approach for clustering.
+    For more information see https://doi.org/10.1038/nn.4268"""
+
+    installation_mesg = """\nTo use Klusta run:\n
        >>> pip install Cython h5py tqdm
        >>> pip install click klusta klustakwik2
 
@@ -48,7 +68,11 @@ class KlustaSorter(BaseSorter):
 
     def __init__(self, **kargs):
         BaseSorter.__init__(self, **kargs)
-
+    
+    @classmethod
+    def is_installed(cls):
+        return HAVE_KLUSTA
+    
     @staticmethod
     def get_sorter_version():
         return klusta.__version__
@@ -77,7 +101,8 @@ class KlustaSorter(BaseSorter):
             # save binary file (chunk by hcunk) into a new file
             raw_filename = output_folder / 'recording.dat'
             dtype = 'int16'
-            recording.write_to_binary_dat_format(raw_filename, time_axis=0, dtype=dtype, chunk_mb=500)
+            recording.write_to_binary_dat_format(raw_filename, time_axis=0, dtype=dtype,chunk_mb=p["chunk_mb"],
+                                                n_jobs=p["n_jobs_bin"], verbose=self.verbose)
 
         if p['detect_sign'] < 0:
             detect_sign = 'negative'

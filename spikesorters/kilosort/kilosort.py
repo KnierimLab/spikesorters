@@ -11,6 +11,8 @@ from ..basesorter import BaseSorter
 from ..utils.shellscript import ShellScript
 from ..sorter_tools import get_git_commit, recover_recording
 
+PathType = Union[str, Path]
+
 
 def check_if_installed(kilosort_path: Union[str, None]):
     if kilosort_path is None:
@@ -33,7 +35,7 @@ class KilosortSorter(BaseSorter):
 
     sorter_name: str = 'kilosort'
     kilosort_path: Union[str, None] = os.getenv('KILOSORT_PATH', None)
-    installed = check_if_installed(kilosort_path)
+    
     requires_locations = False
     
     _default_params = {
@@ -44,8 +46,26 @@ class KilosortSorter(BaseSorter):
         'freq_max': 6000,
         'ntbuff': 64,
         'Nfilt': None,
-        'NT': None
+        'NT': None,
+        'chunk_mb': 500,
+        'n_jobs_bin': 1
     }
+
+    _params_description = {
+        'detect_threshold': "Threshold for spike detection",
+        'car': "Enable or disable common reference",
+        'useGPU': "Enable or disable GPU usage",
+        'freq_min': "High-pass filter cutoff frequency",
+        'freq_max': "Low-pass filter cutoff frequency",
+        'ntbuff': "Samples of symmetrical buffer for whitening and spike detection",
+        'Nfilt': "Number of clusters to use (if None it is automatically computed)",
+        'NT': "Batch size (if None it is automatically computed)",
+        'chunk_mb': "Chunk size in Mb for saving to binary format (default 500Mb)",
+        'n_jobs_bin': "Number of jobs for saving to binary format (Default 1)"
+    }
+
+    sorter_description = """Kilosort is a GPU-accelerated and efficient template-matching spike sorter. 
+    For more information see https://papers.nips.cc/paper/6326-fast-and-accurate-spike-sorting-of-high-channel-count-probes-with-kilosort"""
 
     installation_mesg = """\nTo use Kilosort run:\n
         >>> git clone https://github.com/cortex-lab/KiloSort
@@ -58,7 +78,11 @@ class KilosortSorter(BaseSorter):
 
     def __init__(self, **kargs):
         BaseSorter.__init__(self, **kargs)
-
+    
+    @classmethod
+    def is_installed(cls):
+        return check_if_installed(cls.kilosort_path)
+    
     @staticmethod
     def get_sorter_version():
         commit = get_git_commit(os.getenv('KILOSORT_PATH', None))
@@ -68,10 +92,9 @@ class KilosortSorter(BaseSorter):
             return 'git-' + commit
 
     @staticmethod
-    def set_kilosort_path(kilosort_path: str):
+    def set_kilosort_path(kilosort_path: PathType):
         kilosort_path = str(Path(kilosort_path).absolute())
         KilosortSorter.kilosort_path = kilosort_path
-        KilosortSorter.installed = check_if_installed(KilosortSorter.kilosort_path)
         try:
             print("Setting KILOSORT_PATH environment variable for subprocess calls to:", kilosort_path)
             os.environ["KILOSORT_PATH"] = kilosort_path
@@ -82,9 +105,8 @@ class KilosortSorter(BaseSorter):
         source_dir = Path(__file__).parent
         p = self.params
 
-        if not check_if_installed(KilosortSorter.kilosort_path):
+        if not self.is_installed():
             raise Exception(KilosortSorter.installation_mesg)
-        assert isinstance(KilosortSorter.kilosort_path, str)
 
         # prepare electrode positions for this group (only one group, the split is done in basesorter)
         groups = [1] * recording.get_num_channels()
@@ -94,7 +116,8 @@ class KilosortSorter(BaseSorter):
 
         # save binary file
         input_file_path = output_folder / 'recording'
-        recording.write_to_binary_dat_format(input_file_path, dtype='int16', chunk_mb=500)
+        recording.write_to_binary_dat_format(input_file_path, dtype='int16', chunk_mb=p["chunk_mb"],
+                                             n_jobs=p["n_jobs_bin"], verbose=self.verbose)
 
         # set up kilosort config files and run kilosort on data
         with (source_dir / 'kilosort_master.m').open('r') as f:
@@ -144,7 +167,7 @@ class KilosortSorter(BaseSorter):
             dat_file=str((output_folder / 'recording.dat').absolute()),
             Nfilt=int(p['Nfilt']),
             ntbuff=int(p['ntbuff']),
-            NT=int(p['Nt']),
+            NT=int(p['NT']),
             kilo_thresh=p['detect_threshold'],
             use_car=use_car,
             freq_min=p['freq_min'],
@@ -173,9 +196,10 @@ class KilosortSorter(BaseSorter):
         recording = recover_recording(recording)
         if 'win' in sys.platform and sys.platform != 'darwin':
             shell_cmd = '''
+                        {disk_move}
                         cd {tmpdir}
                         matlab -nosplash -wait -log -r kilosort_master
-                    '''.format(tmpdir=output_folder)
+                    '''.format(disk_move=str(output_folder)[:2], tmpdir=output_folder)
         else:
             shell_cmd = '''
                         #!/bin/bash

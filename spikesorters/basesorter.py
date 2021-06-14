@@ -20,11 +20,11 @@ a way to adapt params with datasets.
 import time
 import copy
 from pathlib import Path
-import os
 import datetime
 import json
 import traceback
 import shutil
+import warnings
 from joblib import Parallel, delayed
 
 import numpy as np
@@ -36,17 +36,18 @@ from .sorter_tools import SpikeSortingError
 
 class BaseSorter:
     sorter_name = ''  # convinience for reporting
-    installed = False  # check at class level if isntalled or not
     SortingExtractor_Class = None  # convinience to get the extractor
     requires_locations = False
     compatible_with_parallel = {'loky': True, 'multiprocessing': True, 'threading': True}
     _default_params = {}
+    _params_description = {}
+    sorter_description = ""
     installation_mesg = ""  # error message when not installed
 
     def __init__(self, recording=None, output_folder=None, verbose=False,
                  grouping_property=None, delete_output_folder=False):
 
-        assert self.installed, """This sorter {} is not installed.
+        assert self.is_installed(), """The sorter {} is not installed.
         Please install it with:  \n{} """.format(self.sorter_name, self.installation_mesg)
         if self.requires_locations:
             if 'location' not in recording.get_shared_channel_property_names():
@@ -92,14 +93,18 @@ class BaseSorter:
 
         # make folders
         for output_folder in self.output_folders:
-            if not output_folder.is_dir():
-                os.makedirs(str(output_folder))
+            output_folder.mkdir(parents=True, exist_ok=True)
+
         self.delete_folders = delete_output_folder
 
     @classmethod
-    def default_params(self):
-        return copy.deepcopy(self._default_params)
+    def default_params(cls):
+        return copy.deepcopy(cls._default_params)
 
+    @classmethod
+    def params_description(cls):
+        return copy.deepcopy(cls._params_description)
+        
     def set_params(self, **params):
         bad_params = []
         for p in params.keys():
@@ -133,7 +138,7 @@ class BaseSorter:
             'sorter_name': str(self.sorter_name),
             'sorter_version': str(self.get_sorter_version()),
             'datetime': now,
-            'runtime_trace':[]
+            'runtime_trace': []
         }
 
         t0 = time.perf_counter()
@@ -197,6 +202,11 @@ class BaseSorter:
     def get_sorter_version():
         # need be implemented in subclass
         raise NotImplementedError
+    
+    @classmethod
+    def is_installed(cls):
+        # need be implemented in subclass
+        raise NotImplementedError
 
     def _setup_recording(self, recording, output_folder):
         # need be implemented in subclass
@@ -215,18 +225,25 @@ class BaseSorter:
     def get_result_from_folder(output_folder):
         raise NotImplementedError
 
-    def get_result_list(self):
+    def get_result_list(self, raise_error=True):
         sorting_list = []
         for i, _ in enumerate(self.recording_list):
-            sorting = self.get_result_from_folder(self.output_folders[i])
-            sorting_list.append(sorting)
+            try:
+                sorting = self.get_result_from_folder(self.output_folders[i])
+                sorting_list.append(sorting)
+            except Exception as err:
+                if raise_error:
+                    raise SpikeSortingError(f"Failed to load sorting output {i}")
+                else:
+                    warnings.warn(f"Sorting output {i} could not be loaded")
         return sorting_list
 
-    def get_result(self):
-        sorting_list = self.get_result_list()
+    def get_result(self, raise_error=True):
+        sorting_list = self.get_result_list(raise_error=raise_error)
+        
         if len(sorting_list) == 1:
             sorting = sorting_list[0]
-        else:
+        elif len(sorting_list) > 1:
             for i, sorting in enumerate(sorting_list):
                 property_name = self.recording_list[i].get_channel_property(self.recording_list[i].get_channel_ids()[0],
                                                                             self.grouping_property)
@@ -238,11 +255,17 @@ class BaseSorter:
             sorting_list = [sort for sort in sorting_list if sort is not None]
             multi_sorting = se.MultiSortingExtractor(sortings=sorting_list)
             sorting = multi_sorting
+        else:
+            raise SpikeSortingError(f"None of the sorting outputs could be loaded")
 
         if self.delete_folders:
             for out in self.output_folders:
                 if self.verbose:
                     print("Removing ", str(out))
                 shutil.rmtree(str(out), ignore_errors=True)
+
         sorting.set_sampling_frequency(self.recording_list[0].get_sampling_frequency())
+        sorting.copy_epochs(self.recording_list[0])
+        sorting.copy_times(self.recording_list[0])
+
         return sorting

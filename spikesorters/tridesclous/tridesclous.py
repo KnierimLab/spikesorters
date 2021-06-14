@@ -28,25 +28,45 @@ class TridesclousSorter(BaseSorter):
     """
 
     sorter_name = 'tridesclous'
-    installed = HAVE_TDC
     requires_locations = False
     compatible_with_parallel = {'loky': True, 'multiprocessing': False, 'threading': False}
 
     _default_params = {
-        'highpass_freq': 400.,
-        'lowpass_freq': 5000.,
-        'peak_sign': '-',
-        'relative_threshold': 5,
+        'freq_min': 400.,
+        'freq_max': 5000.,
+        'detect_sign': -1,
+        'detect_threshold': 5,
         'peak_span_ms': 0.7,
         'wf_left_ms': -2.0,
         'wf_right_ms': 3.0,
         'feature_method': 'auto',  # peak_max/global_pca/by_channel_pca
         'cluster_method': 'auto',  # pruningshears/dbscan/kmeans
         'clean_catalogue_gui': False,
+        'chunk_mb': 500,
+        'n_jobs_bin': 1
     }
 
-    installation_mesg = """
-       >>> pip install https://github.com/tridesclous/tridesclous/archive/master.zip
+    _params_description = {
+        'freq_min': "High-pass filter cutoff frequency",
+        'freq_max': "Low-pass filter cutoff frequency",
+        'detect_threshold': "Threshold for spike detection",
+        'detect_sign': "Use -1 (negative) or 1 (positive) depending "
+                       "on the sign of the spikes in the recording",
+        'peak_span_ms': "Span of the peak in ms",
+        'wf_left_ms': "Cut out before peak in ms",
+        'wf_right_ms': " Cut out after peak in ms",
+        'feature_method': "Feature method to use",  # peak_max/global_pca/by_channel_pca
+        'cluster_method': "Feature method to use",  # pruningshears/dbscan/kmeans
+        'clean_catalogue_gui': "Enable or disable interactive GUI for cleaning templates before peeler",
+        'chunk_mb': "Chunk size in Mb for saving to binary format (default 500Mb)",
+        'n_jobs_bin': "Number of jobs for saving to binary format (Default 1)"
+    }
+
+    sorter_description = """Tridesclous is a template-matching spike sorter with a real-time engine. 
+    For more information see https://tridesclous.readthedocs.io"""
+
+    installation_mesg = """\nTo use Tridesclous run:\n
+       >>> pip install tridesclous
 
     More information on tridesclous at:
       * https://github.com/tridesclous/tridesclous
@@ -55,16 +75,19 @@ class TridesclousSorter(BaseSorter):
 
     def __init__(self, **kargs):
         BaseSorter.__init__(self, **kargs)
-
+    
+    @classmethod
+    def is_installed(cls):
+        return HAVE_TDC
+        
     @staticmethod
     def get_sorter_version():
         return tdc.__version__
 
     def _setup_recording(self, recording, output_folder):
         # reset the output folder
-        if output_folder.is_dir():
-            shutil.rmtree(str(output_folder))
-        os.makedirs(str(output_folder))
+        output_folder.mkdir(parents=True, exist_ok=True)
+        p = self.params
 
         # save prb file
         # note: only one group here, the split is done in basesorter
@@ -83,7 +106,8 @@ class TridesclousSorter(BaseSorter):
                 print('Local copy of recording')
             # save binary file (chunk by hcunk) into a new file
             raw_filename = output_folder / 'raw_signals.raw'
-            recording.write_to_binary_dat_format(raw_filename, time_axis=0, dtype='float32', chunk_mb=500)
+            recording.write_to_binary_dat_format(raw_filename, time_axis=0, dtype='float32', chunk_mb=p["chunk_mb"],
+                                                 n_jobs=p["n_jobs_bin"], verbose=self.verbose)
             dtype = 'float32'
             offset = 0
 
@@ -103,6 +127,8 @@ class TridesclousSorter(BaseSorter):
         tdc_dataio = tdc.DataIO(dirname=str(output_folder))
 
         params = dict(self.params)
+        del params["chunk_mb"], params["n_jobs_bin"]
+
         clean_catalogue_gui = params.pop('clean_catalogue_gui')
         # make catalogue
         chan_grps = list(tdc_dataio.channel_groups.keys())
@@ -159,10 +185,10 @@ class TridesclousSorter(BaseSorter):
 
 
 def make_nested_tdc_params(tdc_dataio, chan_grp,
-                           highpass_freq=400.,
-                           lowpass_freq=5000.,
-                           peak_sign='-',
-                           relative_threshold=5,
+                           freq_min=400.,
+                           freq_max=5000.,
+                           detect_sign='-',
+                           detect_threshold=5,
                            peak_span_ms=0.7,
                            wf_left_ms=-2.0,
                            wf_right_ms=3.0,
@@ -170,11 +196,15 @@ def make_nested_tdc_params(tdc_dataio, chan_grp,
                            cluster_method='auto'):
     params = tdc.get_auto_params_for_catalogue(tdc_dataio, chan_grp=chan_grp)
 
-    params['preprocessor']['highpass_freq'] = highpass_freq
-    params['preprocessor']['lowpass_freq'] = lowpass_freq
+    params['preprocessor']['highpass_freq'] = freq_min
+    params['preprocessor']['lowpass_freq'] = freq_max
 
-    params['peak_detector']['peak_sign'] = peak_sign
-    params['peak_detector']['relative_threshold'] = relative_threshold
+    if detect_sign == -1:
+        params['peak_detector']['peak_sign'] = '-'
+    elif detect_sign == 1:
+        params['peak_detector']['peak_sign'] = '+'
+
+    params['peak_detector']['relative_threshold'] = detect_threshold
     params['peak_detector']['peak_span_ms'] = peak_span_ms
 
     params['extract_waveforms']['wf_left_ms'] = wf_left_ms
